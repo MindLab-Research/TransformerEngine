@@ -747,6 +747,12 @@ void cublas_gemm(const Tensor *inputA, const Tensor *inputB, Tensor *outputD,
   NVTE_CHECK_CUBLAS(cublasLtMatmulPreferenceCreate(&preference));
   NVTE_CHECK_CUBLAS(cublasLtMatmulPreferenceSetAttribute(
       preference, CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &workspaceSize, sizeof(workspaceSize)));
+  if (transformer_engine::getenv<bool>("NVTE_CUBLASLT_NO_SPLIT_K", false)) {
+    const uint32_t reduction_scheme_mask = CUBLASLT_REDUCTION_SCHEME_NONE;
+    NVTE_CHECK_CUBLAS(cublasLtMatmulPreferenceSetAttribute(
+        preference, CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK, &reduction_scheme_mask,
+        sizeof(reduction_scheme_mask)));
+  }
   const auto A_alignment = _getAlignment(reinterpret_cast<uintptr_t>(param.A));
   const auto B_alignment = _getAlignment(reinterpret_cast<uintptr_t>(param.B));
   const auto C_alignment = _getAlignment(reinterpret_cast<uintptr_t>(C));
