@@ -334,6 +334,24 @@ __device__ __forceinline__ void rowwise_scaling(
         ptx::abs_max_2x(thread_amax_2x, thread_amax_2x, rIn[w][e]);
       }
     }
+    // When one thread does not cover a whole scale, the threads that share it must agree on a single
+    // scale for the block: each reads the other's half-window out of shared memory and folds its
+    // magnitudes into the same amax. This deliberately does not use __shfl_xor_sync -- lanes can
+    // return early, and a shuffle across a divergent warp is undefined.
+    if constexpr (ScaleGeom<SD>::THREADS_PER_SCALE_ROWWISE > 1) {
+      const int pair_base_X = (tid_X_rowwise ^ 1) * ELTS_PER_THREAD;
+#pragma unroll
+      for (int w = 0; w < WAVES; ++w) {
+        const int pair_group_idx = ((w + bank_group) * PACK_SIZE) % ELTS_PER_THREAD;
+        __align__(16) IType2 rPair[PACK_SIZE / 2];
+        __uint128_t &pelts_8x = *reinterpret_cast<__uint128_t *>(&rPair);
+        pelts_8x = ptx::ld_shared_b128(&sIn[buff_in][it_offset_Y_rowwise][pair_base_X + pair_group_idx]);
+#pragma unroll
+        for (int e = 0; e < PACK_SIZE / 2; ++e) {
+          ptx::abs_max_2x(thread_amax_2x, thread_amax_2x, rPair[e]);
+        }
+      }
+    }
     const float block_amax = get_amax_of_pair(thread_amax_2x);
 
     ScaleType S_dec_b_fp8;
