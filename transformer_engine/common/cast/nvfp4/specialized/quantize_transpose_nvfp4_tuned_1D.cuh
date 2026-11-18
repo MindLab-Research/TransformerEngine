@@ -45,30 +45,6 @@ struct TunableConfig {
 
 constexpr int THREADS_NUM = 128;
 constexpr int ELTS_PER_THREAD = 16;
-
-//! Scale geometry for a block of `SD` elements.
-/*! `SD` is how many elements one scale covers. It must be a whole multiple of the per-thread
-    payload (`ELTS_PER_THREAD`), because the threads that share a scale combine their amaxes and only
-    one of them stores the result. 16 reproduces the historical NVFP4 configuration exactly; 32 is
-    the MXFP4 block. Everything derived from the block size lives here rather than at namespace
-    scope, which is what allows both to exist in one translation unit. */
-template <int SD>
-struct ScaleGeom {
-  static_assert(SD % ELTS_PER_THREAD == 0, "a scale must span whole thread payloads");
-  static_assert(TILE_DIM_Y % SD == 0, "tile size Y must be divisible by the scale block size");
-  static_assert(TILE_DIM_X % SD == 0, "tile size X must be divisible by the scale block size");
-  static_assert(BUFF_DIM_Y >= SD, "the scale block must fit in the input buffer height");
-
-  static constexpr int SDIM = SD;
-  //! Threads cooperating on one scale (1 when a thread already covers a whole block).
-  static constexpr int THREADS_PER_SCALE_ROWWISE = SD / ELTS_PER_THREAD;
-  static constexpr int SCALES_PER_CHUNK_Y = TunableConfig::CHUNK_DIM_Y / SD;
-  static constexpr int SCALES_PER_CHUNK_X = TunableConfig::CHUNK_DIM_X / SD;
-  static constexpr int SCALES_PER_TILE_Y = TILE_DIM_Y / SD;
-  static constexpr int SCALES_PER_TILE_X = TILE_DIM_X / SD;
-  //! SCALE_DIM-tall windows in the input buffer; the transpose path indexes windows with this.
-  static constexpr int WINDOWS_PER_BUFF_IN = BUFF_IN_DIM_Y / SD;
-};
 constexpr int TILE_DIM_Y = 64;
 constexpr int TILE_DIM_X = 64;
 
@@ -108,6 +84,42 @@ constexpr int BUFF_SIZE_TOTAL = BUFF_SIZE * BUFFS_NUM;
 
 // Input buffer (BF16)
 constexpr int BUFF_IN_DIM_Y = BUFF_DIM_Y;
+
+constexpr int BUFF_OUT_TR_DIM_X = (BUFF_DIM_Y * 4) / 8;
+
+//! Scale geometry for a block of `SD` elements.
+/*! `SD` is how many elements one scale covers. It must be a whole multiple of the per-thread
+    payload (`ELTS_PER_THREAD`), because the threads that share a scale combine their amaxes and only
+    one of them stores the result. 16 reproduces the historical NVFP4 configuration exactly; 32 is
+    the MXFP4 block. Everything derived from the block size lives here rather than at namespace
+    scope, which is what allows both to exist in one translation unit. */
+template <int SD>
+struct ScaleGeom {
+  static_assert(SD % ELTS_PER_THREAD == 0, "a scale must span whole thread payloads");
+  static_assert(TILE_DIM_Y % SD == 0, "tile size Y must be divisible by the scale block size");
+  static_assert(TILE_DIM_X % SD == 0, "tile size X must be divisible by the scale block size");
+  static_assert(BUFF_DIM_Y >= SD, "the scale block must fit in the input buffer height");
+
+  static constexpr int SDIM = SD;
+  //! Threads cooperating on one scale (1 when a thread already covers a whole block).
+  static constexpr int THREADS_PER_SCALE_ROWWISE = SD / ELTS_PER_THREAD;
+  static constexpr int SCALES_PER_CHUNK_Y = TunableConfig::CHUNK_DIM_Y / SD;
+  static constexpr int SCALES_PER_CHUNK_X = TunableConfig::CHUNK_DIM_X / SD;
+  static constexpr int SCALES_PER_TILE_Y = TILE_DIM_Y / SD;
+  static constexpr int SCALES_PER_TILE_X = TILE_DIM_X / SD;
+  //! SCALE_DIM-tall windows in the input buffer; the transpose path indexes windows with this.
+  static constexpr int WINDOWS_PER_BUFF_IN = BUFF_IN_DIM_Y / SD;
+  //! Transpose thread layout. Choosing the X thread count so ScaleGeom<SD>::THREADS_Y_TR equals the number of scale
+  //! rows per tile makes ScaleGeom<SD>::ITERATIONS_TR == 1 at both block sizes: TILE_DIM_X / 2 (= 32) at SD = 16,
+  //! which is the historical layout exactly, and TILE_DIM_X (= 64) at SD = 32.
+  static constexpr int THREADS_X_TR = THREADS_NUM / SCALES_PER_TILE_Y;
+  static constexpr int THREADS_Y_TR = THREADS_NUM / ScaleGeom<SD>::THREADS_X_TR;
+  static_assert(SCALES_PER_TILE_Y % ScaleGeom<SD>::THREADS_Y_TR == 0,
+                "Partial transpose iterations are not supported");
+  static constexpr int ITERATIONS_TR = SCALES_PER_TILE_Y / ScaleGeom<SD>::THREADS_Y_TR;
+  static_assert(ScaleGeom<SD>::ITERATIONS_TR >= 1, "Number of transpose iterations should be >=1");
+  static constexpr int BUFF_OUT_IT_OFFSET = BUFF_OUT_TR_DIM_X / ScaleGeom<SD>::ITERATIONS_TR / STAGES;
+};
 constexpr int BUFF_IN_DIM_X = BUFF_DIM_X;
 constexpr int BUFF_IN_SIZE = BUFF_IN_DIM_Y * BUFF_IN_DIM_X;
 constexpr int BUFF_IN_ELTS_NUM = BUFF_IN_DIM_Y * BUFF_IN_DIM_X;
@@ -119,7 +131,6 @@ constexpr int BUFF_OUT_SIZE = BUFF_OUT_DIM_Y * BUFF_OUT_DIM_X;
 
 // Output transpose buffer (NVFP4)
 constexpr int BUFF_OUT_TR_DIM_Y = BUFF_DIM_X;
-constexpr int BUFF_OUT_TR_DIM_X = (BUFF_DIM_Y * 4) / 8;
 constexpr int BUFF_OUT_TR_SIZE = BUFF_OUT_TR_DIM_Y * BUFF_OUT_TR_DIM_X;
 
 // Manual swizzling parameters to reduce SHMEM bank conflicts
@@ -129,16 +140,7 @@ constexpr int WAVES = ELTS_PER_THREAD / PACK_SIZE;
 constexpr int THREADS_X_ROWWISE = TILE_DIM_X / ELTS_PER_THREAD;
 constexpr int THREADS_Y_ROWWISE = THREADS_NUM / THREADS_X_ROWWISE;
 
-constexpr int THREADS_X_TR = TILE_DIM_X / 2;
-constexpr int THREADS_Y_TR = THREADS_NUM / THREADS_X_TR;
-
 constexpr int ITERATIONS_NORMAL = BUFF_DIM_Y / THREADS_Y_ROWWISE;
-constexpr int ITERATIONS_TR = ScaleGeom<SD>::SCALES_PER_TILE_Y / THREADS_Y_TR;
-static_assert(ITERATIONS_TR >= 1 && "Number of transpose iterations should be >=1\0");
-static_assert((ScaleGeom<SD>::SCALES_PER_TILE_Y % THREADS_Y_TR == 0) &&
-              "Partial transpose iterations are not supported\0");
-
-constexpr int BUFF_OUT_IT_OFFSET = BUFF_OUT_TR_DIM_X / ITERATIONS_TR / STAGES;
 
 static_assert(TunableConfig::CHUNK_DIM_Y >= BUFF_DIM_Y);
 static_assert(BUFF_DIM_Y >= THREADS_Y_ROWWISE &&
