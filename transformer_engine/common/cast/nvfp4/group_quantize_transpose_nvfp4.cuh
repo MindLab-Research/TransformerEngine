@@ -1512,13 +1512,13 @@ __device__ __forceinline__ void group_row_scaled_cast_body(
     // Per-row encode (byte-identical to the single-tensor path): pass the
     // per-expert amax base and a local row offset so amax[row_idx] indexes the
     // expert-local row.
-    rowwise_scaling<ScaleType, USE_STOCHASTIC_ROUNDING, USE_FAST_MATH, ROW_SCALED_NVFP4>(
+    rowwise_scaling<ScaleType, 16, USE_STOCHASTIC_ROUNDING, USE_FAST_MATH, ROW_SCALED_NVFP4>(
         sIn_ptr, sOut_ptr, sSFrowwise_ptr, /*S_enc_rowwise=*/1.0f, stage_Y, stage_X, buff_in,
         buff_out, row_amax_base, static_cast<size_t>(local_row_base), static_cast<size_t>(M_t), rng,
         random_uint4, rnd_idx);
 
     if constexpr (RETURN_TRANSPOSE) {
-      colwise_scaling<ScaleType, USE_STOCHASTIC_ROUNDING, USE_FAST_MATH, ROW_SCALED_NVFP4>(
+      colwise_scaling<ScaleType, 16, USE_STOCHASTIC_ROUNDING, USE_FAST_MATH, ROW_SCALED_NVFP4>(
           sIn_ptr, sOut_tr_ptr, sSFcolwise_ptr, /*S_enc_colwise=*/1.0f, stage_Y, stage_X, buff_in,
           buff_out_tr, col_amax_base, static_cast<size_t>(block_offset_X), cols, rng, random_uint4,
           rnd_idx);
