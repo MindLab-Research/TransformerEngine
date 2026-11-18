@@ -1860,7 +1860,15 @@ void quantize_transpose_impl(const Tensor &input, const Tensor *noop, Tensor *ou
   }
 
   if (!use_2d_quantization && (input.dtype() == DType::kBFloat16)) {
-    quantize_transpose_tuned_1D<ScaleType>(input, noop, output, quant_config, stream);
+    // The block size is a compile-time property of the kernel's tile arithmetic, while the scale
+    // dtype is only known at runtime here, so both instantiations are emitted and selected here.
+    // 16 reproduces the historical NVFP4 configuration; 32 is the MXFP4 block.
+    const DType scale_block_dtype = output->scale_inv.dtype;
+    if (scale_block_dtype == DType::kFloat8E8M0) {
+      quantize_transpose_tuned_1D<ScaleType, 32>(input, noop, output, quant_config, stream);
+    } else {
+      quantize_transpose_tuned_1D<ScaleType, 16>(input, noop, output, quant_config, stream);
+    }
     return;
   }
 
