@@ -200,7 +200,13 @@ __device__ __forceinline__ void colwise_scaling(
   const int warp = threadIdx.x / THREADS_PER_WARP;
   const int thread_lane = threadIdx.x % THREADS_PER_WARP;
 
-  const int tid_Y_colwise = (thread_lane / 2 + warp) % 4;
+  // Number of SCALE_DIM-tall windows in the input buffer. This was a bare `% 4`, which is only
+  // correct because BUFF_IN_DIM_Y / SCALE_DIM happens to be 4 at SCALE_DIM = 16: with any other
+  // block size the index runs past the buffer and the resulting thread_offset_Y_colwise walks off
+  // the end of sOut_tr in the transpose store below.
+  static_assert(BUFF_IN_DIM_Y % SCALE_DIM == 0, "SCALE_DIM must divide the input buffer height");
+  constexpr int WINDOWS_PER_BUFF_IN = BUFF_IN_DIM_Y / SCALE_DIM;
+  const int tid_Y_colwise = (thread_lane / 2 + warp) % WINDOWS_PER_BUFF_IN;
   const int tid_X_colwise = thread_lane;
 
   const int thread_offset_Y_colwise = tid_Y_colwise * SCALE_DIM;
