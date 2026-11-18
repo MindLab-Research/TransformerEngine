@@ -203,7 +203,7 @@ compute_nvfp4_scaling_coefficient(const ScaleType decode_scale, const float glob
   }
 }
 
-template <typename ScaleType, int SD, bool USE_STOCHASTIC_ROUNDING, bool USE_FAST_MATH,
+template <typename ScaleType, int SD = 16, bool USE_STOCHASTIC_ROUNDING, bool USE_FAST_MATH,
           bool ROW_SCALED_NVFP4>
 __device__ __forceinline__ void colwise_scaling(
     const IType *__restrict__ sIn_ptr, fp4e2m1x2 *__restrict__ sOut_tr_ptr,
@@ -288,7 +288,7 @@ __device__ __forceinline__ void colwise_scaling(
   }
 }
 
-template <typename ScaleType, int SD, bool USE_STOCHASTIC_ROUNDING, bool USE_FAST_MATH,
+template <typename ScaleType, int SD = 16, bool USE_STOCHASTIC_ROUNDING, bool USE_FAST_MATH,
           bool ROW_SCALED_NVFP4>
 __device__ __forceinline__ void rowwise_scaling(
     const IType *__restrict__ sIn_ptr, fp4e2m1x2 *__restrict__ sOut_ptr,
@@ -408,7 +408,7 @@ __device__ __forceinline__ void rowwise_scaling(
   }
 }
 
-template <typename ScaleType, int SD, bool USE_STOCHASTIC_ROUNDING, bool USE_FAST_MATH,
+template <typename ScaleType, int SD = 16, bool USE_STOCHASTIC_ROUNDING, bool USE_FAST_MATH,
           bool RETURN_TRANSPOSE, bool ROW_SCALED_NVFP4>
 __global__ void __launch_bounds__(THREADS_NUM) quantize_transpose_nvfp4_tuned_1D_kernel(
     const __grid_constant__ CUtensorMap tensor_map_input,
