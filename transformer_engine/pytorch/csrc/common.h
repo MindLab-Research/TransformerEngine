@@ -366,6 +366,11 @@ class NVFP4Quantizer : public Quantizer {
   int rht_matrix_random_sign_mask_t;
   at::Tensor rht_matrix;
 
+  // dsv41-mxfp4-e8m0-block32: MXFP4 uses E8M0 over 32-element blocks; NVFP4 keeps 16.
+  size_t scale_block_size() const {
+    return scale_dtype == DType::kFloat8E8M0 ? 32 : 16;
+  }
+
   explicit NVFP4Quantizer(const py::handle& quantizer);
 
   NVTEScalingMode get_scaling_mode() const override { return NVTE_NVFP4_1D_SCALING; }

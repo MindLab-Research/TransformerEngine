@@ -168,7 +168,12 @@ class NVFP4Quantizer(Quantizer):
         super().__init__(rowwise=rowwise, columnwise=columnwise)
         self.dtype = DType.cast(fp4_dtype)
         self.scale_dtype = DType.cast(scale_dtype)
-        if self.scale_dtype not in (DType.kFloat8E4M3, DType.kFloat8UE5M3):
+        # dsv41-mxfp4-e8m0-block32: E8M0 selects MXFP4 (32-element blocks).
+        if self.scale_dtype not in (
+            DType.kFloat8E4M3,
+            DType.kFloat8UE5M3,
+            DType.kFloat8E8M0,
+        ):
             raise ValueError("scale_dtype must be DType.kFloat8E4M3 or DType.kFloat8UE5M3.")
         self.with_rht = with_rht
         self.with_post_rht_amax = with_post_rht_amax

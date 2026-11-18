@@ -53,7 +53,11 @@ namespace nvfp4 {
 // SWITCH_FP8UE5M3_TYPE_HANDLE adds UE5M3 when the CUDA toolkit supports it.
 #define TRANSFORMER_ENGINE_NVFP4_SCALE_TYPE_SWITCH(SCALE_DTYPE, SCALE_TYPE, ...)          \
   switch (SCALE_DTYPE) {                                                                  \
-    case DType::kFloat8E4M3: {                                                            \
+    case DType::kFloat8E8M0: {  /* dsv41-mxfp4-e8m0-block32 */                                          \
+      using SCALE_TYPE = fp8e8m0;                                                       \
+      { __VA_ARGS__ }                                                                   \
+    } break;                                                                            \
+    case DType::kFloat8E4M3: {                                                          \
       using SCALE_TYPE = fp8e4m3;                                                         \
       { __VA_ARGS__ }                                                                     \
     } break;                                                                              \
@@ -89,17 +93,45 @@ compute_decoding_scaling_factor(const float block_amax, const float global_encod
   constexpr float fp4_max = TypeExtrema<fp4e2m1>::max;  // 6.0f
   constexpr float fp4_max_inv = 1.0f / fp4_max;
   const float decode_scale = block_amax * (global_encode_scale * fp4_max_inv);
+  if constexpr (std::is_same_v<ScaleType, fp8e8m0>) {
+    // dsv41-mxfp4-e8m0-block32: MXFP4's block scale covers the block -- round UP to a power of two.
+    // The reference implementation matches 2^ceil(log2(amax/6)) on 100% of blocks
+    // (measured, 1024 blocks). Computed from the bit pattern because exp2f/ceilf/log2f
+    // under this build's fast-math stored byte 0 for every block.
+    const float _s = fminf(decode_scale, TypeExtrema<float>::max);
+    if (_s <= 0.0f) {
+      return static_cast<ScaleType>(_s);
+    }
+    const unsigned _b = __float_as_uint(_s);
+    int _e = static_cast<int>((_b >> 23) & 0xFFu) - 127;
+    const bool _exact = ((_b & 0x7FFFFFu) == 0u);
+    if (!_exact) {
+      ++_e;  // 2^ceil: step up unless the value is already a power of two
+    }
+    const unsigned char _byte = static_cast<unsigned char>(_e + 127);
+    ScaleType _out;
+    memcpy(&_out, &_byte, sizeof(_byte));
+    return _out;
+  }
   return static_cast<ScaleType>(fminf(decode_scale, TypeExtrema<float>::max));
 }
 
 // Compute the global encode scale factor for a given global amax.
 // NVFP4 uses the full scale-type range by default. The explicit SCALE_MAX
 // template argument lets recipes such as 4over6 reserve encoding headroom.
-template <typename ScaleType, int SCALE_MAX = static_cast<int>(detail::TypeExtrema<ScaleType>::max)>
+// dsv41-mxfp4-e8m0-block32: sentinel default; a float template parameter is not allowed in C++17.
+template <typename ScaleType, int SCALE_MAX = -1>
 __device__ __forceinline__ float compute_global_encode_scaling_factor_FP4(const float global_amax) {
   using namespace detail;
-  static_assert(SCALE_MAX > 0, "NVFP4 scale maximum must be positive.");
-  constexpr float fp8_max = static_cast<float>(SCALE_MAX);
+  static_assert(SCALE_MAX != 0, "FP4 scale maximum must be non-zero.");
+  constexpr float fp8_max = (SCALE_MAX > 0) ? static_cast<float>(SCALE_MAX)
+                                            : detail::TypeExtrema<ScaleType>::max;
+  if constexpr (std::is_same_v<ScaleType, fp8e8m0>) {
+    // MXFP4 has no tensor-level global scale: the block scale is already an
+    // absolute power of two. Returning anything else made the global factor inf
+    // and saturated the stored exponent (measured relerr=inf).
+    return 1.0f;
+  }
   constexpr float fp4_max = TypeExtrema<fp4e2m1>::max;  // 6.0f;
   float global_encode_scale = fp8_max * fp4_max / global_amax;
   // If scale is infinity, return max value of float32

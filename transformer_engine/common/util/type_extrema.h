@@ -32,9 +32,16 @@ struct TypeExtrema {
   static constexpr float max = std::numeric_limits<T>::max();
 };
 #else
+
 template <typename T>
 struct TypeExtrema;
 #endif
+
+// dsv41-mxfp4-e8m0-block32: E8M0 is a pure biased exponent (value = 2^(e-127)); 2^127 is its max.
+template <>
+struct TypeExtrema<fp8e8m0> {
+  static constexpr float max = 1.7014118e38f;
+};
 
 #if FP4_TYPE_SUPPORTED
 template <>

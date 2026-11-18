@@ -129,7 +129,11 @@ void CheckScaleTensorShape(const Tensor &t, std::string_view name) {
       const auto [first_dim, last_dim] = t.flat_2d_dims();
 
       if (t.has_data()) {
-        constexpr std::array<size_t, 2> block_shape{1, 16};
+        // dsv41-mxfp4-e8m0-block32: 32 for E8M0, 16 otherwise.
+        const DType _sd = t.has_data() ? t.scale_inv.dtype
+                          : (t.has_columnwise_data() ? t.columnwise_scale_inv.dtype
+                                                     : DType::kFloat8E4M3);
+        const std::array<size_t, 2> block_shape{1, _sd == DType::kFloat8E8M0 ? 32 : 16};
         constexpr std::array<size_t, 2> block_alignment{128, 4};
         const std::array<size_t, 2> expected{
             DIVUP_TO_MULTIPLE(DIVUP(first_dim, block_shape[0]), block_alignment[0]),
@@ -139,7 +143,11 @@ void CheckScaleTensorShape(const Tensor &t, std::string_view name) {
                    t.scale_inv.shape, ")");
       }
       if (t.has_columnwise_data()) {
-        constexpr std::array<size_t, 2> block_shape{1, 16};
+        // dsv41-mxfp4-e8m0-block32: 32 for E8M0, 16 otherwise.
+        const DType _sd = t.has_data() ? t.scale_inv.dtype
+                          : (t.has_columnwise_data() ? t.columnwise_scale_inv.dtype
+                                                     : DType::kFloat8E4M3);
+        const std::array<size_t, 2> block_shape{1, _sd == DType::kFloat8E8M0 ? 32 : 16};
         constexpr std::array<size_t, 2> block_alignment{128, 4};
         const std::array<size_t, 2> expected{
             DIVUP_TO_MULTIPLE(DIVUP(last_dim, block_shape[0]), block_alignment[0]),
@@ -182,7 +190,7 @@ void CheckInputTensor(const Tensor &t, std::string_view name, bool check_scale_i
       NVTE_CHECK(t.scale_inv.has_data(), "FP4 scaling factor input ", name,
                  "_scale_inverse must be allocated");
       NVTE_CHECK(
-          t.scale_inv.dtype == DType::kFloat8E4M3 || t.scale_inv.dtype == DType::kFloat8UE5M3,
+          t.scale_inv.dtype == DType::kFloat8E4M3 || t.scale_inv.dtype == DType::kFloat8UE5M3 || t.scale_inv.dtype == DType::kFloat8E8M0,
           "FP4 scaling factor input ", name,
           "_scale_inverse has invalid dtype "
           "(expected Float8E4M3 or Float8UE5M3, got ",
@@ -192,7 +200,7 @@ void CheckInputTensor(const Tensor &t, std::string_view name, bool check_scale_i
       NVTE_CHECK(t.columnwise_scale_inv.has_data(), "FP4 scaling factor input ", name,
                  "_columnwise_scale_inverse must be allocated");
       NVTE_CHECK(t.columnwise_scale_inv.dtype == DType::kFloat8E4M3 ||
-                     t.columnwise_scale_inv.dtype == DType::kFloat8UE5M3,
+                     t.columnwise_scale_inv.dtype == DType::kFloat8UE5M3 || t.columnwise_scale_inv.dtype == DType::kFloat8E8M0,
                  "FP8 scaling factor input ", name,
                  "_columnwise_scale_inverse has invalid dtype "
                  "(expected Float8E4M3 or Float8UE5M3, got ",
@@ -246,7 +254,7 @@ void CheckOutputTensor(const Tensor &t, std::string_view name, bool allow_empty)
       NVTE_CHECK(t.scale_inv.has_data(), "FP4 scaling factor output ", name,
                  "_scale_inverse must be allocated");
       NVTE_CHECK(
-          t.scale_inv.dtype == DType::kFloat8E4M3 || t.scale_inv.dtype == DType::kFloat8UE5M3,
+          t.scale_inv.dtype == DType::kFloat8E4M3 || t.scale_inv.dtype == DType::kFloat8UE5M3 || t.scale_inv.dtype == DType::kFloat8E8M0,
           "FP4 scaling factor output ", name,
           "_scale_inverse has invalid dtype "
           "(expected Float8E4M3 or Float8UE5M3, got ",
@@ -256,7 +264,7 @@ void CheckOutputTensor(const Tensor &t, std::string_view name, bool allow_empty)
       NVTE_CHECK(t.columnwise_scale_inv.has_data(), "FP4 scaling factor output ", name,
                  "_columnwise_scale_inverse must be allocated");
       NVTE_CHECK(t.columnwise_scale_inv.dtype == DType::kFloat8E4M3 ||
-                     t.columnwise_scale_inv.dtype == DType::kFloat8UE5M3,
+                     t.columnwise_scale_inv.dtype == DType::kFloat8UE5M3 || t.columnwise_scale_inv.dtype == DType::kFloat8E8M0,
                  "FP4 scaling factor output ", name,
                  "_columnwise_scale_inverse has invalid dtype "
                  "(expected Float8E4M3 or Float8UE5M3, got ",
@@ -379,7 +387,7 @@ static void CheckGroupedScaleInv(const GroupedTensor &t, std::string_view name, 
       NVTE_CHECK(t.scale_inv.has_data(), tensor_type, " ", name,
                  " rowwise scale_inv must be allocated");
       NVTE_CHECK(
-          t.scale_inv.dtype == DType::kFloat8E4M3 || t.scale_inv.dtype == DType::kFloat8UE5M3,
+          t.scale_inv.dtype == DType::kFloat8E4M3 || t.scale_inv.dtype == DType::kFloat8UE5M3 || t.scale_inv.dtype == DType::kFloat8E8M0,
           tensor_type, " ", name,
           " rowwise scale_inv has invalid dtype "
           "(expected Float8E4M3 or Float8UE5M3, got ",
@@ -389,7 +397,7 @@ static void CheckGroupedScaleInv(const GroupedTensor &t, std::string_view name, 
       NVTE_CHECK(t.columnwise_scale_inv.has_data(), tensor_type, " ", name,
                  " columnwise scale_inv must be allocated");
       NVTE_CHECK(t.columnwise_scale_inv.dtype == DType::kFloat8E4M3 ||
-                     t.columnwise_scale_inv.dtype == DType::kFloat8UE5M3,
+                     t.columnwise_scale_inv.dtype == DType::kFloat8UE5M3 || t.columnwise_scale_inv.dtype == DType::kFloat8E8M0,
                  tensor_type, " ", name,
                  " columnwise scale_inv has invalid dtype "
                  "(expected Float8E4M3 or Float8UE5M3, got ",

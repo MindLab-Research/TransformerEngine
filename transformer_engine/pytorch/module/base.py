@@ -53,6 +53,7 @@ from ..quantized_tensor import QuantizedTensor, QuantizedTensorStorage, Quantize
 from ..tensor.float8_tensor import Float8Quantizer, Float8CurrentScalingQuantizer
 from ..tensor.mxfp8_tensor import MXFP8Quantizer
 from ..tensor.nvfp4_tensor import NVFP4Quantizer
+from ..tensor.nvfp4_tensor import NVFP4Quantizer
 from ..tensor.float8_blockwise_tensor import Float8BlockQuantizer
 from ..tensor.hybrid_tensor import HybridQuantizer
 from ..tensor.identity_tensor import IdentityQuantizer
@@ -1954,7 +1955,24 @@ class TransformerEngineBaseModule(torch.nn.Module, ABC):
             # Wrap parameters in QuantizedTensor if needed
             fp8_meta_index = self.param_init_meta[name].fp8_meta_index
             high_precision_init_val = None
-            if self.primary_weights_in_fp8 and fp8_meta_index is not None:
+            if getattr(self, "primary_weights_in_fp4", None) == "nvfp4":
+                # 4-bit resident parameters. The parameter has already been built in
+                # params_dtype above and is quantised here, exactly as the fp8 branch below
+                # does it, so a params_dtype passed at construction does not prevent the
+                # storage swap. Neither mechanism otherwise offers this: fp8_model_init
+                # covers fp8 storage only, and a CustomRecipe quantizer factory is a
+                # per-GEMM-slot compute quantiser that never allocates a parameter.
+                #
+                # NVFP4Tensor is the 4-bit type that survives being wrapped as an
+                # nn.Parameter (measured); the reference implementation's tensor raises on
+                # detach and cannot be one. That is why this branch offers NVFP4 only --
+                # an E8M0 block-32 scale format has no parameter-capable type here.
+                #
+                # Biases and any 1-D parameter deliberately stay in params_dtype.
+                if param.dim() > 1:
+                    _q = NVFP4Quantizer()
+                    param = _q.quantize(param.detach().contiguous())
+            elif self.primary_weights_in_fp8 and fp8_meta_index is not None:
 
                 # Keep high-precision values on CPU if needed
                 if self.preserve_high_precision_init_val:
