@@ -45,6 +45,11 @@ struct TunableConfig {
 
 constexpr int THREADS_NUM = 128;
 constexpr int ELTS_PER_THREAD = 16;
+// Historical names, kept for the grouped kernel which indexes its own layout with them. The
+// templated path below uses ScaleGeom<SD>; these describe the default 16-element block only.
+constexpr int SCALE_DIM = 16;
+constexpr int SCALES_PER_CHUNK_X = TunableConfig::CHUNK_DIM_X / SCALE_DIM;
+constexpr int SCALES_PER_CHUNK_Y = TunableConfig::CHUNK_DIM_Y / SCALE_DIM;
 constexpr int TILE_DIM_Y = 64;
 constexpr int TILE_DIM_X = 64;
 
@@ -159,9 +164,9 @@ using IType3D = IType[BUFFS_NUM_IN][BUFF_IN_DIM_Y][BUFF_IN_DIM_X];
 using IType2x3D = IType2[BUFFS_NUM_IN][BUFF_IN_DIM_Y][BUFF_IN_DIM_X / 2];
 using OType2x3D = fp4e2m1x2[BUFFS_NUM_OUT][BUFF_OUT_DIM_Y][BUFF_OUT_DIM_X];
 using OType2xt3D = fp4e2m1x2[BUFFS_NUM_OUT_TR][BUFF_OUT_TR_DIM_Y][BUFF_OUT_TR_DIM_X];
-template <typename ScaleType, int SD>
+template <typename ScaleType, int SD = 16>
 using ScalesType2D = ScaleType[TunableConfig::CHUNK_DIM_Y][ScaleGeom<SD>::SCALES_PER_CHUNK_X];
-template <typename ScaleType, int SD>
+template <typename ScaleType, int SD = 16>
 using ScalesTypeTr2D = ScaleType[TunableConfig::CHUNK_DIM_X][ScaleGeom<SD>::SCALES_PER_CHUNK_Y];
 using RNG_t = typename transformer_engine::curanddx::detail::philox4x32_native_state<
     NVTE_BUILD_NUM_PHILOX_ROUNDS>;
