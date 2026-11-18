@@ -61,20 +61,30 @@ __global__ void __launch_bounds__(512)
   if constexpr (WITH_GEMM_SWIZZLED_SCALES) {
     my_scale_index = mxfp8::swizzle::gemm_swizzled_scale_idx(y, x, num_scale_tiles_X);
   } else {
-    my_scale_index = x + y * scale_stride;
+    // dsv41-mxfp4-e8m0-block32: for E8M0 one scale spans 32 elements = two of the kernel's groups.
+    const size_t _grp = std::is_same_v<ScaleType, fp8e8m0> ? (x >> 1) : x;
+    my_scale_index = _grp + y * scale_stride;
   }
   const size_t my_output_index = (x + y * M) * 4;
   fp4vec value;
   value.vec = input_vectorized[my_index];
   ScaleType scale = scales[my_scale_index];
   constexpr float fp4_max = detail::TypeExtrema<fp4e2m1>::max;
-  constexpr float unit_global_scale_amax = fp4_max * static_cast<float>(SCALE_TYPE_MAX);
-  float amax = unit_global_scale_amax;
-  if (tensor_amax != nullptr) {
-    amax = ROW_SCALED_NVFP4 ? tensor_amax[y] : tensor_amax[0];
+  // dsv41-mxfp4-e8m0-block32: MXFP4 has only the per-block scale, which is already an absolute
+  // power of two. Applying NVFP4's two-level formula overflowed (fp4_max * 2^127
+  // -> inf, then inf * 0 = NaN).
+  float final_scale;
+  if constexpr (std::is_same_v<ScaleType, fp8e8m0>) {
+    final_scale = static_cast<float>(scale);
+  } else {
+    constexpr float unit_global_scale_amax = fp4_max * static_cast<float>(SCALE_TYPE_MAX);
+    float amax = unit_global_scale_amax;
+    if (tensor_amax != nullptr) {
+      amax = ROW_SCALED_NVFP4 ? tensor_amax[y] : tensor_amax[0];
+    }
+    constexpr float factor_inv = 1.0f / unit_global_scale_amax;
+    final_scale = static_cast<float>(scale) * amax * factor_inv;
   }
-  constexpr float factor_inv = 1.0f / unit_global_scale_amax;
-  float final_scale = static_cast<float>(scale) * amax * factor_inv;
 #pragma unroll
   for (int i = 0; i < 4; i++) {
     float4 current = static_cast<float4>(value.small_vec[i]);
@@ -132,7 +142,11 @@ inline void dequantize(const Tensor &input, Tensor *output, cudaStream_t stream)
   NVTE_CHECK(M % FP4_BLOCK_SIZE == 0, "Last dimension of FP4 tensors needs to be divisible by ",
              FP4_BLOCK_SIZE, ", but got ", input.data.shape, ".");
 
-  const size_t Mread = M / FP4_BLOCK_SIZE;
+  // dsv41-mxfp4-e8m0-block32: the kernel processes 16 elements per thread (`fp4e2m1x4 small_vec[4]`),
+  // so Mread is always M/16. Setting it to M/scale_block made the kernel cover
+  // only half of every row for block-32 formats (measured: TE's own dequantize
+  // scored relerr 0.805 against 0.393 for a lookup table on the same bytes).
+  const size_t Mread = M / 16;
   const size_t total = N * Mread;
   const size_t threads = 512;
   const size_t blocks = DIVUP(total, threads);
@@ -143,14 +157,20 @@ inline void dequantize(const Tensor &input, Tensor *output, cudaStream_t stream)
              "Row-scaled NVFP4 dequantization requires one rowwise amax per row.");
   const int full_scale_max = static_cast<int>(typeToMax(scale_dtype));
   const bool uses_4over6_headroom = scale_dtype == DType::kFloat8E4M3 && scale_type_max == 256;
-  NVTE_CHECK(scale_type_max == full_scale_max || uses_4over6_headroom, "Unsupported maximum ",
+  // dsv41-mxfp4-e8m0-block32: E8M0's 2^127 has no int form, so the equality is vacuous.
+  NVTE_CHECK(scale_dtype == DType::kFloat8E8M0 ||
+                 scale_type_max == full_scale_max || uses_4over6_headroom, "Unsupported maximum ",
              scale_type_max, " for NVFP4 scale dtype ", to_string(scale_dtype), ".");
   if (uses_4over6_headroom) {
     launch_dequantize<fp8e4m3, 256>(input, output, with_gemm_swizzled_scales, row_scaled_nvfp4, N,
                                     Mread, blocks, threads, num_scale_tiles_X, stream);
   } else {
     TRANSFORMER_ENGINE_NVFP4_SCALE_TYPE_SWITCH(scale_dtype, ScaleType, {
-      constexpr int SCALE_TYPE_MAX = static_cast<int>(TypeInfo<ScaleType>::max_finite_value);
+      // dsv41-mxfp4-e8m0-block32: 0 is a placeholder for E8M0; its real value is set below.
+      constexpr int SCALE_TYPE_MAX =
+          std::is_same_v<ScaleType, fp8e8m0>
+              ? 0
+              : static_cast<int>(TypeInfo<ScaleType>::max_finite_value);
       launch_dequantize<ScaleType, SCALE_TYPE_MAX>(input, output, with_gemm_swizzled_scales,
                                                    row_scaled_nvfp4, N, Mread, blocks, threads,
                                                    num_scale_tiles_X, stream);

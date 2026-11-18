@@ -126,8 +126,11 @@ void quantize_fwd_helper(const NVTETensor input, NVTETensor output,
       const DType scale_dtype = output_tensor->scale_inv.has_data()
                                     ? output_tensor->scale_inv.dtype
                                     : output_tensor->columnwise_scale_inv.dtype;
-      NVTE_CHECK(nvfp4_use_4over6 || static_cast<float>(output_tensor->get_nvfp4_scale_max()) ==
-                                         typeToMax(scale_dtype),
+      // dsv41-mxfp4-e8m0-block32: E8M0's max finite value is 2^127, which the runtime int scale-max
+      // cannot represent, so the equality is vacuous there.
+      NVTE_CHECK(nvfp4_use_4over6 || scale_dtype == DType::kFloat8E8M0 ||
+                     static_cast<float>(output_tensor->get_nvfp4_scale_max()) ==
+                         typeToMax(scale_dtype),
                  "NVFP4 quantization with non-default scale max is only supported with 4over6.");
       NVTE_CHECK(!nvfp4_use_4over6 || !quant_config_cpp.stochastic_rounding,
                  "NVFP4 4over6 quantization does not support stochastic rounding.");
@@ -315,8 +318,11 @@ void quantize_bwd_helper(const NVTETensor grad, const NVTETensor input, NVTETens
       const DType scale_dtype = output_tensor->scale_inv.has_data()
                                     ? output_tensor->scale_inv.dtype
                                     : output_tensor->columnwise_scale_inv.dtype;
-      NVTE_CHECK(nvfp4_use_4over6 || static_cast<float>(output_tensor->get_nvfp4_scale_max()) ==
-                                         typeToMax(scale_dtype),
+      // dsv41-mxfp4-e8m0-block32: E8M0's max finite value is 2^127, which the runtime int scale-max
+      // cannot represent, so the equality is vacuous there.
+      NVTE_CHECK(nvfp4_use_4over6 || scale_dtype == DType::kFloat8E8M0 ||
+                     static_cast<float>(output_tensor->get_nvfp4_scale_max()) ==
+                         typeToMax(scale_dtype),
                  "NVFP4 quantization with non-default scale max is only supported with 4over6.");
       NVTE_CHECK(!nvfp4_use_4over6 || !quant_config_cpp.stochastic_rounding,
                  "NVFP4 4over6 quantization does not support stochastic rounding.");

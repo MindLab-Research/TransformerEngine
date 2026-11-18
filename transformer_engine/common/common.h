@@ -478,6 +478,9 @@ struct Tensor {
         return 448;
       case DType::kFloat8UE5M3:
         return 114688;
+      case DType::kFloat8E8M0:
+        // dsv41-mxfp4-e8m0-block32: 2^127 has no int form; only an amax fallback.
+        return 2147483647;
       default:
         NVTE_ERROR("Unsupported scale dtype for NVFP4 tensor (", to_string(dtype), ")");
     }

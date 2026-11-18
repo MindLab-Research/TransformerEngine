@@ -1892,8 +1892,11 @@ NVFP4Quantizer::NVFP4Quantizer(const py::handle& quantizer) : Quantizer(quantize
   }
   this->row_scaled_nvfp4 = quantizer.attr("row_scaled_nvfp4").cast<bool>();
   this->scale_dtype = quantizer.attr("scale_dtype").cast<DType>();
-  NVTE_CHECK(this->scale_dtype == DType::kFloat8E4M3 || this->scale_dtype == DType::kFloat8UE5M3,
-             "Unsupported NVFP4 scale dtype: ", static_cast<int>(this->scale_dtype));
+  // dsv41-mxfp4-e8m0-block32: E8M0 selects MXFP4 (32-element blocks).
+  NVTE_CHECK(this->scale_dtype == DType::kFloat8E4M3 ||
+                 this->scale_dtype == DType::kFloat8UE5M3 ||
+                 this->scale_dtype == DType::kFloat8E8M0,
+             "Unsupported NVFP4/MXFP4 scale dtype: ", static_cast<int>(this->scale_dtype));
   this->disable_second_level_scale = quantizer.attr("disable_second_level_scale").cast<bool>();
 
   // Get amax reduction group if needed for NVFP4 AG
@@ -2869,12 +2872,14 @@ std::vector<size_t> NVFP4Quantizer::get_scale_shape(const std::vector<size_t>& s
   if (rowwise_usage) {
     // rowwise scaling factor shape
     size_t sinv0 = roundup(flat_first_dim, 128);
-    size_t sinv1 = roundup(ceildiv(last_dim, NVFP4_BLOCK_SIZE), 4);
+    // dsv41-mxfp4-e8m0-block32: block size follows the scale dtype.
+    size_t sinv1 = roundup(ceildiv(last_dim, scale_block_size()), 4);
     scale_shape = {sinv0, sinv1};
   } else {
     // columnwise scaling factor shape
     size_t sinv0 = roundup(last_dim, 128);
-    size_t sinv1 = roundup(ceildiv(flat_first_dim, NVFP4_BLOCK_SIZE), 4);
+    // dsv41-mxfp4-e8m0-block32: block size follows the scale dtype (columnwise).
+    size_t sinv1 = roundup(ceildiv(flat_first_dim, scale_block_size()), 4);
     scale_shape = {sinv0, sinv1};
   }
   return scale_shape;
