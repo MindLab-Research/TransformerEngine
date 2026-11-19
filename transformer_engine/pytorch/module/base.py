@@ -47,7 +47,7 @@ from ..distributed import (
     in_fp8_activation_recompute_phase,
     _fsdp_gather_tensors,
 )
-from ..constants import dist_group_type
+from ..constants import DType, dist_group_type
 from ..cpp_extensions.gemm import _NUM_MAX_UB_STREAMS
 from ..quantized_tensor import QuantizedTensor, QuantizedTensorStorage, Quantizer
 from ..tensor.float8_tensor import Float8Quantizer, Float8CurrentScalingQuantizer
@@ -1955,7 +1955,8 @@ class TransformerEngineBaseModule(torch.nn.Module, ABC):
             # Wrap parameters in QuantizedTensor if needed
             fp8_meta_index = self.param_init_meta[name].fp8_meta_index
             high_precision_init_val = None
-            if getattr(self, "primary_weights_in_fp4", None) == "nvfp4":
+            _fp4_param_format = getattr(self, "primary_weights_in_fp4", None)
+            if _fp4_param_format in ("nvfp4", "mxfp4"):
                 # 4-bit resident parameters. The parameter has already been built in
                 # params_dtype above and is quantised here, exactly as the fp8 branch below
                 # does it, so a params_dtype passed at construction does not prevent the
@@ -1970,7 +1971,15 @@ class TransformerEngineBaseModule(torch.nn.Module, ABC):
                 #
                 # Biases and any 1-D parameter deliberately stay in params_dtype.
                 if param.dim() > 1:
-                    _q = NVFP4Quantizer()
+                    # The format decides the scale: E8M0 gives the checkpoint-native MXFP4
+                    # (32-element blocks), E4M3 gives NVFP4 (16-element blocks).
+                    _q = NVFP4Quantizer(
+                        scale_dtype=(
+                            DType.kFloat8E8M0
+                            if _fp4_param_format == "mxfp4"
+                            else DType.kFloat8E4M3
+                        )
+                    )
                     param = _q.quantize(param.detach().contiguous())
             elif self.primary_weights_in_fp8 and fp8_meta_index is not None:
 
